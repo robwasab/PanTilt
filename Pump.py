@@ -1,32 +1,48 @@
 from smbus2 import SMBus, i2c_msg
+from PowerSwitch import PowerSwitch
+import subprocess
+import time
+import pdb
 
-bus = SMBus(0)
 
 PUMP_ADDR_0 = 0x38
 PUMP_ADDR_1 = 0x39
 PUMP_ADDR_2 = 0x3A
 
+color2addr = {
+   'orange': PUMP_ADDR_0,
+   'white' : PUMP_ADDR_1,
+   'yellow': PUMP_ADDR_2,
+}
+
+class Pump(object):
+
+   def startDispense(self, color):
+      addr = '%02x'%color2addr[color]
+      cmd = f'i2cset -y 1 0x{addr} 0x44 0x2c 0x2a i'
+      subprocess.call(cmd, shell=True)
 
 
-def send_cmd(addr, cmd_data, num2read):
-   
-   with SMBus(1) as bus:
-      # write the command data
-      cmd_msg = i2c_msg.write(addr, cmd_data)
-
-      # read data + 1 for a status byte back
-      rsp_msg = i2c_msg.read(addr, num2read + 1)
-
-      bus.i2c_rdwr(cmd_msg, rsp_msg)
-
-      print(rsp_msg)
-
-   return bytearray(rsp_msg)
+   def stopDispense(self, color):
+      addr = color2addr[color]
+      addr = '%02x'%color2addr[color]
+      cmd = f'i2cset -y 1 0x{addr} 0x78'
+      subprocess.call(cmd, shell=True)
 
 
-def get_fw_version():
-   rsp = send_cmd(PUMP_ADDR_2, [ord('i')], 16)
-   print(rsp)
 
-get_fw_version()
+      
+
+
+if __name__ == '__main__':
+   import time
+   pwr = PowerSwitch()
+   pwr.setPumpPower(True)
+   time.sleep(.1)
+
+   pump = Pump()
+
+   pump.startDispense('white')
+
+   pdb.set_trace()
 

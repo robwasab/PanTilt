@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+import numpy as np
 
 import glob
 
@@ -12,7 +13,7 @@ print(files)
 
 num_files = len(files)
 
-num_rows = max(1, num_files // 3)
+num_rows =  int(np.ceil(num_files / 3))
 
 plt.figure(figsize=(15, 5 * num_rows))
 
