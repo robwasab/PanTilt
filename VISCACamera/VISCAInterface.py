@@ -304,15 +304,18 @@ class VISCAInterface(object):
 		rom_version = data[4:6]
 		max_sockets = int(data[6])
 
-		logging.debug(f'vendor_id: {hexstr(vendor_id)}')
-		logging.debug(f' model_id: {hexstr(model_id)}')
-		logging.debug(f' rom_vers: {hexstr(rom_version)}')
-		logging.debug(f' max_sock: {max_sockets}')
+		#logging.debug(f'vendor_id: {hexstr(vendor_id)}')
+		#logging.debug(f' model_id: {hexstr(model_id)}')
+		#logging.debug(f' rom_vers: {hexstr(rom_version)}')
+		#logging.debug(f' max_sock: {max_sockets}')
 
 		return {
-			'vendor_id': vendor_id,
-			'model_id': model_id,
-			'rom_version': rom_version,
+			'vendor_id'      : vendor_id,
+			'vendor_id_str'  : hexstr(vendor_id),
+			'model_id'       : model_id,
+			'model_id_str'   : hexstr(model_id),
+			'rom_version'    : rom_version,
+			'rom_version_str': hexstr(rom_version),
 		}
 
 
@@ -372,6 +375,7 @@ class VISCAInterface(object):
 		self.send_and_block(hex_str)
 
 
+	"""
 	def cmd_pan_up(self, pan_speed=1, tilt_speed=0):
 		logging.debug("cmd_pan_up()")
 		hex_str = '81 01 06 01 %02x %02x 03 01 FF'%(pan_speed, tilt_speed)
@@ -398,6 +402,7 @@ class VISCAInterface(object):
 		hex_str = '81 01 06 01 %02x %02x 02 03 FF'%(pan_speed, tilt_speed)
 		#logging.debug(hex_str)
 		self.send_and_block(hex_str)
+	"""
 
 
 	def cmd_pt_pos(self, pan_angle, tilt_angle=0, pan_speed=0x14):
@@ -454,6 +459,7 @@ class VISCAInterface(object):
 		self.send_and_block(hex_str)
 
 
+	"""
 	def cmd_zoom_stop(self):
 		hex_str = '81 01 04 07 00 FF'
 		self.send_and_block(hex_str)
@@ -490,7 +496,18 @@ class VISCAInterface(object):
 		hex_str = f'81 01 04 07 3{value} FF'
 		self.send_and_block(hex_str)
 
+	def cmd_focus_stop(self):
+		hex_str = '81 01 04 08 00 FF'
+		self.send_and_block(hex_str)
 
+	def cmd_focus_far(self):
+		hex_str = '81 01 04 08 02 FF'
+		self.send_and_block(hex_str)
+
+	def cmd_focus_near(self):
+		hex_str = '81 01 04 08 03 FF'
+		self.send_and_block(hex_str)
+	"""
 
 
 	def cmd_zoom_position(self, position):
@@ -515,6 +532,34 @@ class VISCAInterface(object):
 		self.send_and_block(hex_str)
 
 
+	def inquiry_zoom_position(self):
+		hex_str = f'81 09 04 47 FF'
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type=RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		pval = data[0] & 0x0f
+		qval = data[1] & 0x0f
+		rval = data[2] & 0x0f
+		sval = data[3] & 0x0f
+
+		zoom_position = 0
+		zoom_position |= pval << (3 * 4)
+		zoom_position |= qval << (2 * 4)
+		zoom_position |= rval << (1 * 4)
+		zoom_position |= sval << (0 * 4)
+		return zoom_position
+
+
+
 	def cmd_focus_position(self, position):
 		'''
 		position ranges from:
@@ -523,6 +568,9 @@ class VISCAInterface(object):
 
 		Note, you must call cmd_focus_manual()!
 		Or the camera will ignore commands
+
+		This command can take a long time if the current
+		focus position if FAR away from the requested one
 		'''
 		min_zoom_pos = 0x0000
 		max_zoom_pos = 0x4000
@@ -540,25 +588,122 @@ class VISCAInterface(object):
 		self.send_and_block(hex_str)
 
 
-	def cmd_focus_stop(self):
-		hex_str = '81 01 04 08 00 FF'
-		self.send_and_block(hex_str)
-
-	def cmd_focus_far(self):
-		hex_str = '81 01 04 08 02 FF'
-		self.send_and_block(hex_str)
-
-	def cmd_focus_near(self):
-		hex_str = '81 01 04 08 03 FF'
-		self.send_and_block(hex_str)
 
 	def cmd_focus_manual(self):
 		hex_str = '81 01 04 38 03 FF'
 		self.send_and_block(hex_str)
 
+
 	def cmd_focus_auto(self):
 		hex_str = '81 01 04 38 02 FF'
 		self.send_and_block(hex_str)
+
+
+	def inquiry_is_autofocus(self):
+		hex_str = f'81 09 04 38 FF'
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type=RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		if data[0] == 0x02:
+			return True
+		elif data[0] == 0x03:
+			return False
+		else:
+			assert(False)
+
+
+	def inquiry_focus_position(self):
+		hex_str = f'81 09 04 48 FF'
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type=RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+		
+		pval = data[0] & 0x0f
+		qval = data[1] & 0x0f
+		rval = data[2] & 0x0f
+		sval = data[3] & 0x0f
+
+		focus_position = 0
+		focus_position |= pval << (3 * 4)
+		focus_position |= qval << (2 * 4)
+		focus_position |= rval << (1 * 4)
+		focus_position |= sval << (0 * 4)
+		return focus_position
+
+
+	def cmd_set_red_gain(self, red):
+		p = hex_alphanum(red, 1)
+		q = hex_alphanum(red, 0)
+
+		hex_str = f'81 01 04 43 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+		
+
+
+	def inquiry_picture_settings(self):
+		hex_str = f'81 09 7E 7E 01 FF'
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type=RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		red_gain  = ((data[0] & 0x0f) << 4) | (data[1] & 0x0f)
+		blue_gain = ((data[2] & 0x0f) << 4) | (data[3] & 0x0f)
+		wb_mode   = (data[4] & 0x0f)
+		aperature = (data[5] & 0x0f)
+		auto_exp_mode = data[6]
+		shutter_pos = data[8]
+		iris_pos = data[9]
+		assert(0 == data[10])
+		bright_pos = data[11]
+
+		'''
+		print('red gain:', red_gain)
+		print('blue gain:', blue_gain)
+		print('wb mode:', wb_mode)
+		print('aperature:', aperature)
+		print('auto exp mode:', auto_exp_mode)
+		print('shutter pos:', shutter_pos)
+		print('iris pos:', iris_pos)
+		print('bright pos:', bright_pos)
+		'''
+
+		return {
+			'red_gain': red_gain,
+			'blue_gain': blue_gain,
+			'wb_mode': wb_mode,
+			'aperature': aperature,
+			'auto_exp_mode': auto_exp_mode,
+			'shutter_pos': shutter_pos,
+			'iris_pos': iris_pos,
+			'bright_pos': bright_pos,
+		}
+
+
 
 
 
