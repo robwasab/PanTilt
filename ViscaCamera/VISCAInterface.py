@@ -1,11 +1,15 @@
+from serial.tools import list_ports
 import serial
 import pdb
 import time
+import os
 #import logging
+
 from enum import Enum
 from enum import auto
 
-BROADCAST_HEADER = 0x88
+
+
 
 class logging(object):
 	@classmethod
@@ -21,10 +25,20 @@ def hexstr(arr):
 	)
 
 def hex_alphanum(value, nibble_pos):
+	'''
+	Examples:
+	hex_alphanum(value=0x1234, nibble_pos=0) -> '4'
+	hex_alphanum(value=0x1234, nibble_pos=1) -> '3'
+	hex_alphanum(value=0x1234, nibble_pos=2) -> '2'
+	hex_alphanum(value=0x1234, nibble_pos=3) -> '1'
+	
+	'''
 	mask = 0x0f << (4 * nibble_pos)
 	return '%x'%(
 		(value & mask) >> (4 * nibble_pos)
 	)
+
+
 
 # VISCA Response codes, per specification
 RSP_TYPE_ACK = 4
@@ -34,10 +48,33 @@ RSP_TYPE_ERR = 6
 RSP_TYPE_INQUIRY = 100
 
 
+
 class VISCAError(Enum):
+	'''
+	Enum object representing the possible VISCA error codes if
+	RSP_TYPE_ERR is returned by a command
+	'''
 	NONE = auto()
 	UNK_RECV_ADDR = auto()
 	UNK_RSP_TYPE = auto()
+
+
+
+def usb_to_tty(vid, pid, serial_number=None): 
+	'''
+	Given USB Vendor ID, and Product ID, return the associated dev path
+	If there are two of the same type of USB to serial converters connected
+	Use serial_number to distinguish between the two.
+	'''
+	for port in list_ports.comports():
+		if port.vid and port.pid:
+			if (vid == port.vid) and (pid == port.pid):
+				if serial_number:
+					if serial_number == port.serial_number:
+						return os.path.join('/dev', port.name)
+				else:
+					return os.path.join('/dev', port.name)
+
 
 class VISCAInterface(object):
 	def __init__(self, serial_address, baud_rate=9600):
@@ -70,6 +107,44 @@ class VISCAInterface(object):
 		)
 
 
+	def send_and_block(self, payload, wait_for=RSP_TYPE_COMPLETE):
+		'''
+		blocks until response complete has been received
+
+		payload may be either bytearray or hexstring
+		'''
+		if type(payload) is str:
+			payload = bytearray.fromhex(payload)
+
+		assert(type(payload) is bytearray)
+
+		self.ser.write(payload)
+		time.sleep(0.5)
+
+		start_time = time.time()
+		last_time = start_time
+		done = False
+
+		responses = []
+
+		while not done:
+			responses.extend(
+				self.process_rx()
+			)
+
+			for rsp in responses:
+				if rsp['error'] == VISCAError.NONE:
+					if rsp['rsp_type'] == wait_for:
+						done=True
+
+			if time.time() > (last_time + 1):
+				last_time = time.time()
+				sec_elapsed = time.time() - start_time
+				logging.debug('%.3f sec elapsed...'%sec_elapsed)
+
+		return responses
+
+
 	def process_rx(self):
 		'''
 		read receive serial buffer
@@ -93,16 +168,15 @@ class VISCAInterface(object):
 			for packet in packets
 		]
 
-		#print(f'num responses: {len(responses)}')
-
-		#for response in responses:
-		#	print(response)
-
 		return responses
 
 
 	@classmethod
 	def process_header(cls, data):
+		'''
+		classmethod because this is stateless
+		'''
+
 		header = data[0]
 		sender_addr = (header & 0x70) >> 4
 		receiv_addr = (header & 0x3)
@@ -175,11 +249,13 @@ class VISCAInterface(object):
 		data = bytes([0x88, 0x30, 0x01, 0xff])
 		self.send_bytes(data)
 
+
 	def cmd_home(self):
 		logging.debug("cmd_home()")
-		self.send_bytes(
-			bytearray.fromhex('81 01 06 04 FF')
+		self.send_and_block(
+			'81 01 06 04 FF',
 		)
+
 
 	def cmd_if_clear(self):
 		logging.debug("cmd_if_clear()")
@@ -187,8 +263,13 @@ class VISCAInterface(object):
 			bytearray.fromhex('88 01 00 01 FF')
 		)
 
+
 	@classmethod
 	def filter_responses(cls, responses, **search_dict):
+		'''
+		Commands can return multiple responses, this method helps
+		filter out a single response given some search terms
+		'''
 		for rsp in responses:
 			for key in search_dict:
 				if rsp[key] != search_dict[key]:
@@ -197,12 +278,14 @@ class VISCAInterface(object):
 				# made it through all of the search terms, return this
 				return rsp
 
+
 	def inquiry_camera_version(self):
 		logging.debug("inquiry_camera_version()")
 		camera = 1
 		hex_str = f'8{camera} 09 00 02 FF'
-		responses = self.send_bytes(
-			bytearray.fromhex(hex_str)
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
 		)
 
 		rsp = VISCAInterface.filter_responses(
@@ -226,9 +309,19 @@ class VISCAInterface(object):
 		logging.debug(f' rom_vers: {hexstr(rom_version)}')
 		logging.debug(f' max_sock: {max_sockets}')
 
+		return {
+			'vendor_id': vendor_id,
+			'model_id': model_id,
+			'rom_version': rom_version,
+		}
+
 
 	@classmethod
 	def convert_to_signed(cls, val):
+		'''
+		Converts a signed 16 bit number into a signed
+		system integer number.
+		'''
 		if val & (1 << 15):
 			return -(1 + (0xffff - val))
 		else:
@@ -236,9 +329,12 @@ class VISCAInterface(object):
 
 
 	def inquiry_position(self):
-		#logging.debug('inquiry_position()')
+		logging.debug('inquiry_position()')
 		hex_str = f'81 09 06 12 FF'
-		responses = self.send_bytes(bytearray.fromhex(hex_str))
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
 
 		rsp = VISCAInterface.filter_responses(
 			responses,
@@ -260,42 +356,15 @@ class VISCAInterface(object):
 
 		pan_val = VISCAInterface.convert_to_signed(
 			int(pan_hex_str, 16)
-		) / 5120 * 180
+		) / 5120 * 360
 
 		tilt_val = VISCAInterface.convert_to_signed(
 			int(tilt_hex_str, 16)
-		) / 5120 * 180
-
-		'''
-		print('Pan: %s, %f'%(
-			pan_hex_str,
-			pan_val,
-		))
-		print('Tilt: %s, %f'%(
-			tilt_hex_str,
-			tilt_val,
-		))
-		'''
+		) / 5120 * 360
 
 		return pan_val, tilt_val
 
-	def send_and_block(self, hex_str):
-		responses = self.send_hex_str(hex_str)
 
-		start_time = time.time()
-		last_time = start_time
-		done = False
-		while not done:
-			if responses:
-				for rsp in responses:
-					if rsp['error'] == VISCAError.NONE:
-						if rsp['rsp_type'] == RSP_TYPE_COMPLETE:
-							done = True
-			responses = self.process_rx()
-			if time.time() > (last_time + 1):
-				last_time = time.time()
-				sec_elapsed = time.time() - start_time
-				print('%.3f sec elapsed...'%sec_elapsed)
 
 	def cmd_pt_reset(self):
 		logging.debug("cmd_pt_reset()")
@@ -307,28 +376,28 @@ class VISCAInterface(object):
 		logging.debug("cmd_pan_up()")
 		hex_str = '81 01 06 01 %02x %02x 03 01 FF'%(pan_speed, tilt_speed)
 		logging.debug(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_pan_down(self, pan_speed=1, tilt_speed=0):
 		logging.debug("cmd_pan_down()")
 		hex_str = '81 01 06 01 %02x %02x 03 02 FF'%(pan_speed, tilt_speed)
 		logging.debug(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_pan_right(self, pan_speed=1, tilt_speed=0):
 		logging.debug("cmd_pan_right()")
 		hex_str = '81 01 06 01 %02x %02x 01 03 FF'%(pan_speed, tilt_speed)
 		logging.debug(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_pan_left(self, pan_speed=1, tilt_speed=0):
 		logging.debug("cmd_pan_left()")
 		hex_str = '81 01 06 01 %02x %02x 02 03 FF'%(pan_speed, tilt_speed)
 		#logging.debug(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_pt_pos(self, pan_angle, tilt_angle=0, pan_speed=0x14):
@@ -377,27 +446,27 @@ class VISCAInterface(object):
 
 	def cmd_power_on(self):
 		hex_str = '81 01 04 00 02 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_power_off(self):
 		hex_str = '81 01 04 00 03 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_zoom_stop(self):
 		hex_str = '81 01 04 07 00 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_zoom_tele_standard(self):
 		hex_str = '81 01 04 07 02 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_zoom_wide_standard(self):
 		hex_str = '81 01 04 07 03 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_zoom_tele_variable(self, value):
@@ -408,7 +477,7 @@ class VISCAInterface(object):
 		assert(0 <= value);
 		assert(value <= 7)
 		hex_str = f'81 01 04 07 2{value} FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_zoom_wide_variable(self, value):
@@ -419,7 +488,7 @@ class VISCAInterface(object):
 		assert(0 <= value);
 		assert(value <= 7)
 		hex_str = f'81 01 04 07 3{value} FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 
@@ -443,7 +512,7 @@ class VISCAInterface(object):
 
 		hex_str = f'81 01 04 47 0{pval} 0{qval} 0{rval} 0{sval} FF'
 		#print(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_focus_position(self, position):
@@ -468,39 +537,43 @@ class VISCAInterface(object):
 		sval = hex_alphanum(position, 0)
 		hex_str = f'81 01 04 48 0{pval} 0{qval} 0{rval} 0{sval} FF'
 		#print(hex_str)
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 	def cmd_focus_stop(self):
 		hex_str = '81 01 04 08 00 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 	def cmd_focus_far(self):
 		hex_str = '81 01 04 08 02 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 	def cmd_focus_near(self):
 		hex_str = '81 01 04 08 03 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 	def cmd_focus_manual(self):
 		hex_str = '81 01 04 38 03 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 	def cmd_focus_auto(self):
 		hex_str = '81 01 04 38 02 FF'
-		self.send_hex_str(hex_str)
+		self.send_and_block(hex_str)
 
 
 
+if __name__ == '__main__':
 
 
+	# you can run 'python -m serial.tools.list_ports -v'
+	# to list serial ports and usb vendor and product ids
 
-
-while True:
-	#logging.basicConfig(filename='main.log', filemode='w', level=logging.DEBUG)
-
-	cam = VISCAInterface('COM3')
+	cam = VISCAInterface(
+		usb_to_tty(
+			vid=0x0403,
+			pid=0x6001,
+		)
+	)
 
 	print('Begin...')
 
@@ -515,7 +588,6 @@ while True:
 	cam.cmd_home()
 
 	time.sleep(2)
-
 
 	cam.cmd_pan_left(pan_speed=0x10)
 
