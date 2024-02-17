@@ -3,18 +3,18 @@ import serial
 import pdb
 import time
 import os
-#import logging
+import logging
 
 from enum import Enum
 from enum import auto
 
 
-
-
+'''
 class logging(object):
 	@classmethod
 	def debug(cls, *args, **kwargs):
 		print(*args, **kwargs)
+'''
 
 #cmd = bytearray.fromhex('FF 01 00 04 3F 00 44')
 #ser = serial.Serial('COM3', 9600)
@@ -23,6 +23,7 @@ def hexstr(arr):
 	return ' '.join(
 		'%02x'%b for b in arr
 	)
+
 
 def hex_alphanum(value, nibble_pos):
 	'''
@@ -46,7 +47,7 @@ RSP_TYPE_COMPLETE = 5
 RSP_TYPE_ERR = 6
 # this is my own response type
 RSP_TYPE_INQUIRY = 100
-
+TIMEOUT_SEC = 20
 
 
 class VISCAError(Enum):
@@ -58,6 +59,17 @@ class VISCAError(Enum):
 	UNK_RECV_ADDR = auto()
 	UNK_RSP_TYPE = auto()
 
+
+class ExposureMode(Enum):
+	AUTO = auto()
+	MANUAL = auto()
+	SHUTTER_PRIORITY = auto()
+	IRIS_PRIORITY = auto()
+	BRIGHT = auto()
+
+
+class VISCATimeout(Exception):
+	pass
 
 
 def usb_to_tty(vid, pid, serial_number=None): 
@@ -77,6 +89,19 @@ def usb_to_tty(vid, pid, serial_number=None):
 
 
 class VISCAInterface(object):
+	'''
+	All commands can raise a VISCATimeout exception.
+	Since the interface is RS232, it is possible for a
+	command to get either corrupted or lost in either 
+	the camera system or our own OS.
+
+	Therefore, if we are sitting, waiting for a response
+	for too much time, we raise a VISCATimeout exception,
+	which you can use to restart the camera and walk up 
+	the stack to a point where you can begin your routine
+	again, potentially resetting the camera at the beginning
+	to a known stage.
+	'''
 	def __init__(self, serial_address, baud_rate=9600):
 		self.ser = serial.Serial(
 			serial_address,
@@ -142,6 +167,9 @@ class VISCAInterface(object):
 				sec_elapsed = time.time() - start_time
 				logging.debug('%.3f sec elapsed...'%sec_elapsed)
 
+			if time.time() > (start_time + TIMEOUT_SEC):
+				raise VISCATimeout()
+
 		return responses
 
 
@@ -183,7 +211,6 @@ class VISCAInterface(object):
 
 		if receiv_addr != 0:
 			#print('not addressed to us, ignoring...')
-			print()
 			return {
 				'error': VISCAError.UNK_RECV_ADDR,
 				'data': data[2:],
@@ -648,13 +675,64 @@ class VISCAInterface(object):
 		return focus_position
 
 
+	'''
 	def cmd_set_red_gain(self, red):
 		p = hex_alphanum(red, 1)
 		q = hex_alphanum(red, 0)
 
 		hex_str = f'81 01 04 43 00 00 0{p} 0{q} FF'
 		self.send_and_block(hex_str)
-		
+	'''
+
+
+	'''
+	def cmd_set_blue_gain(self, blue):
+		p = hex_alphanum(blue, 1)
+		q = hex_alphanum(blue, 0)
+
+		hex_str = f'81 01 04 44 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+	'''
+
+
+	def cmd_set_exposure_mode(self, exposure_mode):
+		mode2int = {
+			ExposureMode.AUTO  : '00',
+			ExposureMode.MANUAL: '03',
+			ExposureMode.SHUTTER_PRIORITY: '0A',
+			ExposureMode.IRIS_PRIORITY: '0B',
+			ExposureMode.BRIGHT: '0D',
+
+		}
+		hex_str = f'81 01 04 39 {mode2int[exposure_mode]} FF'
+		self.send_and_block(hex_str)
+
+	
+
+
+	def inquiry_auto_exposure_mode(self):
+		hex_str = f'81 09 04 39 FF'
+		responses = self.send_and_block(
+			hex_str,
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type=RSP_TYPE_INQUIRY,
+		)
+
+		auto_exposure_mode_map = {
+			0x00: ExposureMode.AUTO,
+			0x03: ExposureMode.MANUAL,
+			0x0A: ExposureMode.SHUTTER_PRIORITY,
+			0x0B: ExposureMode.IRIS_PRIORITY,
+			0x0D: ExposureMode.BRIGHT,
+		}
+
+		return auto_exposure_mode_map[rsp['data'][0]]
+
+
 
 
 	def inquiry_picture_settings(self):
@@ -702,6 +780,20 @@ class VISCAInterface(object):
 			'iris_pos': iris_pos,
 			'bright_pos': bright_pos,
 		}
+
+
+	def init(self):
+		self.cmd_address_set()
+		self.cmd_if_clear()
+		self.cmd_pt_reset()
+		self.cmd_set_exposure_mode(ExposureMode.AUTO)
+		self.cmd_focus_auto()
+		info = self.inquiry_camera_version()
+		logging.debug(f'Firmware Info:')
+		logging.debug(f"vendor id: {info['vendor_id_str']}")
+		logging.debug(f"model  id: {info['model_id_str']}")
+		logging.debug(f"rom versi: {info['rom_version_str']}")
+		self.cmd_home()
 
 
 

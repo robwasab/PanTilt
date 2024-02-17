@@ -1,21 +1,6 @@
-from VISCACamera.VISCAInterface import VISCAInterface, usb_to_tty
+from VISCACamera.VISCAInterface import VISCAInterface, usb_to_tty, ExposureMode, VISCATimeout
+
 import time
-
-def test_init(cam):
-	cam.cmd_address_set()
-
-	cam.cmd_if_clear()
-
-	cam.cmd_pt_reset()
-
-	info = cam.inquiry_camera_version()
-
-	print(f'Firmware Info:')
-	print(f"vendor id: {info['vendor_id_str']}")
-	print(f"model  id: {info['model_id_str']}")
-	print(f"rom versi: {info['rom_version_str']}")
-
-	cam.cmd_home()
 
 def test_pos(cam):
 	fail = False
@@ -26,8 +11,8 @@ def test_pos(cam):
 		if abs(pan_angle - pan_pos) > 10:
 			fail |= True
 
-		print(pan_angle, pan_pos)
-	return fail
+		#print(pan_angle, pan_pos)
+	return not fail
 
 
 def test_zoom(cam):
@@ -45,15 +30,15 @@ def test_zoom(cam):
 		cam.cmd_zoom_position(zoom_pos)
 		time.sleep(1)
 		read_zoom_pos = cam.inquiry_zoom_position()
-		print(zoom_pos, read_zoom_pos)
+		#print(zoom_pos, read_zoom_pos)
 
 		if abs(zoom_pos - read_zoom_pos) > 10:
 			fail |= True
 	
-	return fail
+	return not fail
 
 
-def test_zoom_and_focus(cam):
+def test_focus(cam):
 	cam.cmd_focus_manual()
 	assert(False == cam.inquiry_is_autofocus())
 
@@ -69,7 +54,7 @@ def test_zoom_and_focus(cam):
 	for focus_pos in focus_positions:
 		cam.cmd_focus_position(focus_pos)
 		read_focus_pos = cam.inquiry_focus_position()
-		print(focus_pos, read_focus_pos)
+		#print(focus_pos, read_focus_pos)
 
 		if abs(focus_pos - read_focus_pos) > 10:
 			fail |= True
@@ -77,17 +62,16 @@ def test_zoom_and_focus(cam):
 	cam.cmd_focus_auto()
 	assert(True == cam.inquiry_is_autofocus())
 
-	return fail
+	return not fail
 
 
 def test_picture(cam):
-	print(
-		cam.inquiry_picture_settings()
-	)
-	#cam.cmd_set_red_gain(61)
-	print(
-		cam.inquiry_picture_settings()
-	)
+	cam.cmd_set_exposure_mode(ExposureMode.MANUAL)
+	assert(ExposureMode.MANUAL == cam.inquiry_auto_exposure_mode())
+	settings = cam.inquiry_picture_settings()
+	cam.cmd_set_exposure_mode(ExposureMode.AUTO)
+	print(settings)
+	return True
 
 
 
@@ -98,11 +82,29 @@ cam = VISCAInterface(
 	)
 )
 
-cam.cmd_if_clear()
-test_init(cam)
-test_pos(cam)
-test_zoom(cam)
-test_zoom_and_focus(cam)
-test_picture(cam)
+init = True
+
+restarts = 3
+
+for k in range(restarts):
+	try:
+		cam.cmd_if_clear()
+
+		if init:
+			cam.init()
+
+		def evaluate(test_func):
+			print(f'Testing {test_func.__name__}...')
+			print('PASS' if test_func(cam) else 'FAIL')
+
+		evaluate(test_pos)
+		evaluate(test_zoom)
+		evaluate(test_focus)
+		evaluate(test_picture)
+		break
+
+
+	except VISCATimeout:
+		init = True
 
 
