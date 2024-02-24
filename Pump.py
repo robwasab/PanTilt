@@ -51,6 +51,7 @@ class Pump(object):
 	def dispenseStatus(self, color):
 		with SMBus(1) as bus:
 
+			num2read = 32
 			for k in range(NUM_TRIES):
 				#if 0 < k:
 				#	print('Retry: ', k)
@@ -69,7 +70,7 @@ class Pump(object):
 
 				read_msg = i2c_msg.read(
 					color2addr[color],
-					16
+					num2read,
 				)
 
 				bus.i2c_rdwr(read_msg)
@@ -101,10 +102,15 @@ class Pump(object):
 
 						req_amt, pump_active = rsp.split(',')
 
+						if '1' == pump_active or '-1' == pump_active:
+							pump_on = True
+						else:
+							pump_on = False
+
 						return {
 							'req_ml': req_amt,
 							'pump_status': pump_active,
-							'pump_on': True if '1' == pump_active else False,
+							'pump_on': pump_on,
 						}
 
 				except UnicodeDecodeError:
@@ -142,12 +148,12 @@ if __name__ == '__main__':
 	pump = Pump()
 
 	#pump.startDispense('white')
-	pump.stopDispense('white')
+	#pump.stopDispense('white')
 
 	time.sleep(1)
 
-	pump.dispense_ml('white', 30)
-	pump.dispense_ml('orange', 50)
+	pump.dispense_ml('white', -10)
+	pump.dispense_ml('orange', 30)
 
 
 	for _ in range(100):
