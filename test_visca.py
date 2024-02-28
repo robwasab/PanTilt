@@ -74,6 +74,75 @@ def test_picture(cam):
 	return True
 
 
+def test_aperature(cam):
+	'''
+	This example shows how to set the aperature
+
+	Setting aperature seems to work in both
+	manual and auto exposure mode
+	'''
+
+	for value in range(1):
+		print('Testing aperature: ', value)
+
+		cam.cmd_aperature_gain_set_value(value)
+		settings = cam.inquiry_picture_settings()
+		assert(settings['aperature'] == value)
+
+	cam.cmd_aperature_gain_reset()
+	print(cam.inquiry_picture_settings())
+	return True
+
+
+def test_gain(cam):
+	cam.cmd_set_exposure_mode(ExposureMode.MANUAL)
+	for gain in [0, 16, 32, 64]:
+		print('testing gain: ', gain)
+		cam.cmd_gain_set_value(gain)
+		print(cam.inquiry_picture_settings())
+	return True
+
+
+def test_exposure_comp(cam):
+	# Test enable compensation
+	cam.cmd_exposure_comp_enable()
+	assert(True == cam.inquiry_exposure_comp_is_enabled())
+
+	# Test disabling compensation
+	cam.cmd_exposure_comp_disable()
+	assert(False == cam.inquiry_exposure_comp_is_enabled())
+
+	# Enable compensation or else set commands wont work
+	cam.cmd_exposure_comp_enable()
+	assert(True == cam.inquiry_exposure_comp_is_enabled())
+
+	for value in range(15):
+		cam.cmd_exposure_comp_set_value(value)
+
+		read_val = cam.inquiry_exposure_comp_get_value()
+		print(f"Set exposure comp to: {value}, read {read_val}")
+		assert(read_val == value)
+
+	print('resetting exposure compensation')
+	cam.cmd_exposure_comp_reset()
+	print('reset value: ', cam.inquiry_exposure_comp_get_value())
+	return True
+
+
+def test_shutter(cam):
+	for value in range(1, 18):
+		cam.cmd_shutter_set_value(value)
+
+		read_val = cam.inquiry_shutter_get_value()
+
+		print(f'setting shutter to: {value}, read: {read_val}') 
+		assert(read_val == value)
+
+	print('resetting shutter')
+	cam.cmd_shutter_reset()
+	print('read shutter value: ', cam.inquiry_shutter_get_value())
+	return True
+
 
 cam = VISCAInterface(
 	usb_to_tty(
@@ -82,7 +151,7 @@ cam = VISCAInterface(
 	)
 )
 
-init = True
+init = False
 
 restarts = 3
 
@@ -91,6 +160,7 @@ for k in range(restarts):
 		cam.cmd_if_clear()
 
 		if init:
+			print('initializing')
 			cam.init()
 
 		def evaluate(test_func):
@@ -101,10 +171,15 @@ for k in range(restarts):
 		evaluate(test_zoom)
 		evaluate(test_focus)
 		evaluate(test_picture)
+		evaluate(test_aperature)
+		evaluate(test_gain)
+		evaluate(test_exposure_comp)
+		evaluate(test_shutter)
 		break
 
 
 	except VISCATimeout:
 		init = True
+		print('VISCA timeout')
 
 

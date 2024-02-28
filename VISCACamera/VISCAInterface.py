@@ -72,6 +72,7 @@ class VISCATimeout(Exception):
 	pass
 
 
+
 def usb_to_tty(vid, pid, serial_number=None): 
 	'''
 	Given USB Vendor ID, and Product ID, return the associated dev path
@@ -676,6 +677,7 @@ class VISCAInterface(object):
 
 
 	'''
+	This command hangs
 	def cmd_set_red_gain(self, red):
 		p = hex_alphanum(red, 1)
 		q = hex_alphanum(red, 0)
@@ -686,6 +688,7 @@ class VISCAInterface(object):
 
 
 	'''
+	This command hangs
 	def cmd_set_blue_gain(self, blue):
 		p = hex_alphanum(blue, 1)
 		q = hex_alphanum(blue, 0)
@@ -782,12 +785,203 @@ class VISCAInterface(object):
 		}
 
 
+
+
+
+	#---------------------------------------------------------------------------
+	# Aperature
+	#---------------------------------------------------------------------------
+	'''
+	These commands seem to hang the camera
+	def cmd_aperature_set_mode_auto(self):
+		hex_str = f'81 01 04 05 02 FF'
+		self.send_and_block(hex_str)
+
+
+	def cmd_aperature_set_mode_manual(self):
+		hex_str = f'81 01 04 05 03 FF'
+		self.send_and_block(hex_str)
+	'''
+
+	def cmd_aperature_gain_reset(self):
+		hex_str = f'81 01 04 02 00 FF'
+		self.send_and_block(hex_str)
+
+
+	def cmd_aperature_gain_set_value(self, value):
+		'''
+		Valid aperature settings are from 0 to 11 inclusive
+		'''
+		assert(0 <= value)
+		assert(value <= 11)
+
+		p = hex_alphanum(value, 1)
+		q = hex_alphanum(value, 0)
+		hex_str = f'81 01 04 42 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+
+
+	def inquiry_aperature_mode_is_auto(self):
+		hex_str = f'81 09 04 05 FF'
+		responses = self.send_and_block(
+			hex_str, 
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type = RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		if 0x02 == data[0]:
+			# Auto sharpness
+			return True
+		else:
+			# Manual sharpness
+			return False
+
+
+	#---------------------------------------------------------------------------
+	# Gain
+	#---------------------------------------------------------------------------
+	def cmd_gain_set_value(self, value):
+		assert(0 <= value)
+		assert(value <= 0xff)
+
+		p = hex_alphanum(value, 1)
+		q = hex_alphanum(value, 0)
+		hex_str = f'81 01 04 0C 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+
+
+	def cmd_gain_reset(self):
+		hex_str = f'81 01 04 0C 00 FF'
+		self.send_and_block(hex_str)
+
+
+	#---------------------------------------------------------------------------
+	# Exposure Compensation
+	#---------------------------------------------------------------------------
+	def cmd_exposure_comp_enable(self):
+		self.send_and_block('81 01 04 3E 02 FF')
+
+	def cmd_exposure_comp_disable(self):
+		self.send_and_block('81 01 04 3E 03 FF')
+
+	def cmd_exposure_comp_reset(self):
+		self.send_and_block('81 01 04 0E 00 FF')
+
+	def cmd_exposure_comp_set_value(self, value):
+		'''
+		Values 0 to 14 inclusive
+		'''
+		assert(0 <= value)
+		assert(value <= 14)
+
+		p = hex_alphanum(value, 1)
+		q = hex_alphanum(value, 0)
+		hex_str = f'81 01 04 4E 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+
+	def inquiry_exposure_comp_is_enabled(self):
+		hex_str = f'81 09 04 3E FF'
+
+		responses = self.send_and_block(
+			hex_str, 
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type = RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		if 0x02 == data[0]:
+			# Enabled
+			return True
+		else:
+			# Disableds
+			return False
+
+	def inquiry_exposure_comp_get_value(self):
+		hex_str = f'81 09 04 4E FF'
+
+		responses = self.send_and_block(
+			hex_str, 
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type = RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		assert(0x00 == data[0])
+		assert(0x00 == data[1])
+		p = 0x0f & data[2]
+		q = 0x0f & data[3]
+		return (p << 4) | q
+
+
+
+	#---------------------------------------------------------------------------
+	# Shutter
+	#---------------------------------------------------------------------------
+	def cmd_shutter_reset(self):
+		self.send_and_block('81 01 04 0A 00 FF')
+
+	def cmd_shutter_set_value(self, value):
+		'''
+		Values 1 to 17 inclusive
+		'''
+		assert(1 <= value)
+		assert(value <= 17)
+
+		p = hex_alphanum(value, 1)
+		q = hex_alphanum(value, 0)
+		hex_str = f'81 01 04 4A 00 00 0{p} 0{q} FF'
+		self.send_and_block(hex_str)
+		
+
+	def inquiry_shutter_get_value(self):
+		hex_str = f'81 09 04 4A FF'
+
+		responses = self.send_and_block(
+			hex_str, 
+			wait_for=RSP_TYPE_INQUIRY,
+		)
+
+		rsp = VISCAInterface.filter_responses(
+			responses,
+			rsp_type = RSP_TYPE_INQUIRY,
+		)
+
+		data = rsp['data']
+
+		assert(0x00 == data[0])
+		assert(0x00 == data[1])
+		p = 0x0f & data[2]
+		q = 0x0f & data[3]
+		return (p << 4) | q
+
+
+
+	#---------------------------------------------------------------------------
+	# Init Routine
+	#---------------------------------------------------------------------------
 	def init(self):
 		self.cmd_address_set()
 		self.cmd_if_clear()
 		self.cmd_pt_reset()
 		self.cmd_set_exposure_mode(ExposureMode.AUTO)
 		self.cmd_focus_auto()
+
 		info = self.inquiry_camera_version()
 		logging.debug(f'Firmware Info:')
 		logging.debug(f"vendor id: {info['vendor_id_str']}")
