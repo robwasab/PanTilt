@@ -38,5 +38,14 @@ class Lights(object):
 if __name__ == '__main__':
    lights = Lights()
 
-   pdb.set_trace()
-   
+   test_colors = [
+      'uv',
+      'violet',
+      'blue',
+      'cyan',
+      'white',
+   ]
+
+   for test_color in test_colors:
+      lights.on(test_color)
+      input('enter to continue')
